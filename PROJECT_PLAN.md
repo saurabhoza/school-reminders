@@ -2,8 +2,11 @@
 
 Development guidance: repository Python skills are installed under `.agents/skills/`
 and routed from AGENTS.md. They cover SOLID, patterns, style, typing, and validation;
-existing application code has not been refactored as part of their installation.
+application responsibilities now separate CLI, OAuth, Gmail I/O, and MIME parsing.
 Linting and static type-checking enforcement remain future development tooling work.
+The refactor preserves CLI/export contracts and current interactive authorization
+behavior; non-interactive server authorization remains future work. Tests were
+left unchanged and not run for this refactor at the user's request.
 
 ## 1. Gmail reading — implemented, live verification pending
 

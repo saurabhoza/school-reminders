@@ -1,132 +1,97 @@
-"""Read-only Gmail access and MIME message normalization."""
+"""Read-only Gmail transport, sender filtering, and result pagination."""
 
-import base64
-from dataclasses import asdict, dataclass
-from email import policy
-from email.parser import BytesParser
-from email.utils import getaddresses
-from html.parser import HTMLParser
-from pathlib import Path
+from __future__ import annotations
+
 import re
+from email.utils import getaddresses
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+from school_reminders.auth import SCOPES as SCOPES
+from school_reminders.auth import load_credentials
+from school_reminders.messages import EmailMessage as EmailMessage
+from school_reminders.messages import normalize_message as normalize_message
 
+if TYPE_CHECKING:
+    from googleapiclient.discovery import Resource
 
-class _HTMLText(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.parts = []
-        self.hidden = 0
+# Re-export existing public names so current callers keep working after the split.
+__all__ = ["SCOPES", "EmailMessage", "connect", "normalize_message", "read_messages", "validate_sender"]
 
-    def handle_starttag(self, tag, attrs):
-        if tag in {"script", "style"}:
-            self.hidden += 1
-        if tag in {"br", "p", "div", "li", "tr"}:
-            self.parts.append("\n")
-
-    def handle_endtag(self, tag):
-        if tag in {"script", "style"}:
-            self.hidden = max(0, self.hidden - 1)
-        if tag in {"p", "div", "li", "tr"}:
-            self.parts.append("\n")
-
-    def handle_data(self, data):
-        if not self.hidden:
-            self.parts.append(data)
-
-
-@dataclass(frozen=True)
-class EmailMessage:
-    message_id: str
-    thread_id: str
-    internal_date_ms: str
-    rfc_message_id: str
-    sender: str
-    subject: str
-    date: str
-    text: str
-    html: str
-    raw_base64url: str
-
-    def to_dict(self):
-        return asdict(self)
-
-
-def normalize_message(resource: dict) -> EmailMessage:
-    raw = resource["raw"]
-    message = BytesParser(policy=policy.default).parsebytes(
-        base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
-    )
-    # get_body selects the body rather than attached text files or forwarded mail.
-    plain_part = message.get_body(preferencelist=("plain",))
-    html_part = message.get_body(preferencelist=("html",))
-    plain = plain_part.get_content() if plain_part else ""
-    html = html_part.get_content() if html_part else ""
-    if not plain and html:
-        parser = _HTMLText()
-        parser.feed(html)
-        plain = "".join(parser.parts).strip()
-    return EmailMessage(
-        message_id=resource["id"], thread_id=resource.get("threadId", ""),
-        internal_date_ms=resource.get("internalDate", ""),
-        rfc_message_id=str(message.get("Message-ID", "")),
-        sender=str(message.get("From", "")), subject=str(message.get("Subject", "")),
-        date=str(message.get("Date", "")), text=plain, html=html,
-        raw_base64url=raw,
-    )
+MAX_PAGE_SIZE = 500
+SENDER_PATTERN = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
 def validate_sender(sender: str) -> str:
+    """Strip whitespace and validate the existing single-address input format.
+
+    Raises:
+        ValueError: If the input contains a display name or unsupported address.
+    """
     sender = sender.strip()
-    if not re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", sender):
+    if not SENDER_PATTERN.fullmatch(sender):
         raise ValueError("Provide a single sender email address, without a display name.")
     return sender
 
 
-def connect(credentials_path: Path, token_path: Path):
-    # Lazy imports keep parsing and unit tests independent of Google libraries.
-    from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
+def connect(credentials_path: Path, token_path: Path) -> Resource:
+    """Build a Gmail client using cached, refreshed, or interactive credentials.
+
+    May open a browser through OAuth. Google API errors are left intact for the
+    caller; no mailbox writes are performed or authorized.
+    """
     from googleapiclient.discovery import build
 
-    credentials = None
-    if token_path.exists():
-        credentials = Credentials.from_authorized_user_file(str(token_path), SCOPES)
-    if not credentials or not credentials.valid:
-        if credentials and credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-        else:
-            if not credentials_path.is_file():
-                raise FileNotFoundError(
-                    f"OAuth credentials missing: {credentials_path}. See README.md for setup."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), SCOPES)
-            credentials = flow.run_local_server(port=0)
-        token_path.parent.mkdir(parents=True, exist_ok=True)
-        token_path.write_text(credentials.to_json(), encoding="utf-8")
+    credentials = load_credentials(credentials_path, token_path)
     return build("gmail", "v1", credentials=credentials, cache_discovery=False)
 
 
-def read_messages(service, sender: str, limit: int = 20) -> list[EmailMessage]:
+def _get_message(messages_api: Any, message_id: str) -> EmailMessage:
+    # Dynamic discovery methods and vendor payloads stay inside this adapter.
+    resource = messages_api.get(userId="me", id=message_id, format="raw").execute()
+    fields = {"id", "raw", "threadId", "internalDate"}
+    if not isinstance(resource, dict):
+        raise ValueError("Gmail returned an invalid message resource.")
+    if not {"id", "raw"}.issubset(resource):
+        raise ValueError("Gmail message is missing its ID or raw MIME source.")
+    if any(not isinstance(value, str) for key, value in resource.items() if key in fields):
+        raise ValueError("Gmail message metadata and MIME source must be strings.")
+    return normalize_message({key: resource[key] for key in fields if key in resource})
+
+
+def _matches_sender(message: EmailMessage, sender: str) -> bool:
+    addresses = {address.casefold() for _, address in getaddresses([message.sender])}
+    return sender.casefold() in addresses
+
+
+def read_messages(service: Resource, sender: str, limit: int = 20) -> list[EmailMessage]:
+    """Return up to ``limit`` emails whose From address matches ``sender``.
+
+    Follows Gmail result pages, excluding spam/trash by the API default. Gmail
+    search may match aliases, so each decoded From header is verified separately.
+    The supplied client is owned by the caller. No messages are modified.
+
+    Raises:
+        ValueError: If sender/limit or a fetched message resource is invalid.
+        HttpError: If a Gmail API request fails (propagated unchanged).
+    """
     sender = validate_sender(sender)
     if limit < 1:
         raise ValueError("Limit must be positive.")
-    messages = []
-    page_token = None
+
+    messages: list[EmailMessage] = []
+    page_token: str | None = None
+    messages_api = service.users().messages()
     while len(messages) < limit:
-        page = service.users().messages().list(
-            userId="me", q=f"from:({sender})", maxResults=min(500, limit - len(messages)),
+        page = messages_api.list(
+            userId="me",
+            q=f"from:({sender})",
+            maxResults=min(MAX_PAGE_SIZE, limit - len(messages)),
             pageToken=page_token,
         ).execute()
         for item in page.get("messages", []):
-            resource = service.users().messages().get(
-                userId="me", id=item["id"], format="raw"
-            ).execute()
-            message = normalize_message(resource)
-            # Gmail search can match aliases; verify the actual From address too.
-            addresses = {address.casefold() for _, address in getaddresses([message.sender])}
-            if sender.casefold() in addresses:
+            message = _get_message(messages_api, item["id"])
+            if _matches_sender(message, sender):
                 messages.append(message)
         page_token = page.get("nextPageToken")
         if not page_token:

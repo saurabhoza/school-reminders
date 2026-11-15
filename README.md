@@ -64,6 +64,11 @@ school-reminders/
 └── .gitignore       # Files excluded from Git
 ```
 
+Application responsibilities are separated into `cli.py` (arguments, export, and
+presentation), `auth.py` (OAuth and token persistence), `gmail.py` (Gmail requests
+and sender filtering), and `messages.py` (email values and pure MIME parsing).
+Existing imports from `gmail.py` remain available for compatibility.
+
 Replace the example sender with the school's exact address. The installed
 `school-reminders` command accepts the same options. Credential paths are relative
 to the working directory; override using `--credentials PATH` and `--token PATH`.
@@ -98,4 +103,5 @@ or `$python-code-style`. Newly installed skills are available on the next turn.
 
 These instructions preserve Python 3.10 support and unittest. Ruff and mypy are
 recommended options, not installed or enforced checks. Adding skills does not
-refactor the existing application or change its implemented milestones.
+automatically enforce checks. The application has been refactored using these
+skills while retaining its CLI options, export fields, and OAuth behavior.
