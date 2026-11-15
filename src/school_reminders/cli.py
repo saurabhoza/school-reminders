@@ -6,8 +6,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from school_reminders.gmail import connect, read_messages, validate_sender
-from school_reminders.messages import EmailMessage
+from school_reminders.domain.email_message import EmailMessage
+from school_reminders.email.gmail import connect, read_messages, validate_sender
 
 
 def _build_parser() -> argparse.ArgumentParser:

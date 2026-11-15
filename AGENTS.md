@@ -5,6 +5,8 @@ school sender; later identify activities and store their dates, email references
 and exact original supporting text. See PROJECT_PLAN.md for scope and milestones.
 
 - Use src/school_reminders/ for application code and pyproject.toml for packaging.
+- Group email integration code in src/school_reminders/email/ and domain classes
+  in src/school_reminders/domain/. Domain classes must not depend on integration code.
 - Keep CLI, Gmail transport, future extraction, and persistence separate.
 - Place offline tests in tests/unit/. Future live tests go in tests/integration/
   and must be explicitly invoked with local credentials.

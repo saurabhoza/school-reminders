@@ -64,10 +64,24 @@ school-reminders/
 └── .gitignore       # Files excluded from Git
 ```
 
-Application responsibilities are separated into `cli.py` (arguments, export, and
-presentation), `auth.py` (OAuth and token persistence), `gmail.py` (Gmail requests
-and sender filtering), and `messages.py` (email values and pure MIME parsing).
-Existing imports from `gmail.py` remain available for compatibility.
+Application responsibilities are organized as follows:
+
+```text
+src/school_reminders/
+├── cli.py
+├── domain/
+│   ├── __init__.py
+│   └── email_message.py  # Email value object
+├── email/
+│   ├── __init__.py
+│   ├── auth.py           # OAuth and token persistence
+│   ├── gmail.py          # Gmail requests and sender filtering
+│   └── mime.py           # Pure MIME parsing
+└── gmail.py              # Compatibility imports for original callers
+```
+
+The CLI handles arguments, JSON export, and presentation. Domain classes do not
+depend on Gmail transport, OAuth, or the CLI.
 
 Replace the example sender with the school's exact address. The installed
 `school-reminders` command accepts the same options. Credential paths are relative

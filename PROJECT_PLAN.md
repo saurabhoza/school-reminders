@@ -3,6 +3,7 @@
 Development guidance: repository Python skills are installed under `.agents/skills/`
 and routed from AGENTS.md. They cover SOLID, patterns, style, typing, and validation;
 application responsibilities now separate CLI, OAuth, Gmail I/O, and MIME parsing.
+Email integration lives in `email/`; domain value objects live in `domain/`.
 Linting and static type-checking enforcement remain future development tooling work.
 The refactor preserves CLI/export contracts and current interactive authorization
 behavior; non-interactive server authorization remains future work. Tests were
