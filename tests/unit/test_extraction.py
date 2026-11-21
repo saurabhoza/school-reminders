@@ -1,13 +1,16 @@
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from dataclasses import replace
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 from school_reminders.groq_model import GroqNoticeModel
 
-from school_reminders.cli import main
+from school_reminders.cli import _print_classification, main
 from school_reminders.extraction import extract_notices
 from school_reminders.gmail import normalize_message
 from test_gmail import resource
@@ -24,6 +27,7 @@ class ExtractionTests(unittest.TestCase):
                            evidence=[dict(segment=2, quote="hats &amp; coats")],
                            audience_evidence=[dict(segment=1, quote="Oak")])
         self.result = {"notices": [self.notice]}
+        self.responses = iter(())
         self.requests = []
         http_client = httpx.Client(transport=httpx.MockTransport(self.respond))
         self.addCleanup(http_client.close)
@@ -35,7 +39,7 @@ class ExtractionTests(unittest.TestCase):
         return httpx.Response(200, json={
             "id": "test", "created": 0, "model": "test", "object": "chat.completion",
             "choices": [{"index": 0, "finish_reason": "stop", "message": {
-                "role": "assistant", "content": json.dumps(self.result)}}],
+                "role": "assistant", "content": json.dumps(next(self.responses, self.result))}}],
         })
 
     def test_whole_email_request_and_source_evidence(self):
@@ -68,10 +72,29 @@ class ExtractionTests(unittest.TestCase):
         self.result = {"notices": []}
         self.assertEqual(extract_notices(self.model, self.message), [])
 
+    def test_corrects_each_reported_evidence_failure_once(self):
+        for change in ({"evidence": [dict(segment=2, quote="hats & coats")]},
+                       {"audience_evidence": []}):
+            with self.subTest(change=change):
+                self.requests.clear()
+                self.responses = iter([{"notices": [dict(self.notice, **change)]}, self.result])
+                notice, = extract_notices(self.model, self.message)
+                self.assertEqual(notice["evidence"][0]["quote"], "hats &amp; coats")
+                self.assertEqual(len(self.requests), 2)
+                self.assertIn("previous report failed", self.requests[1]["messages"][0]["content"])
+                payload = json.loads(self.requests[1]["messages"][1]["content"])
+                self.assertEqual([part["segment"] for part in payload], list(range(len(payload))))
+
+    def test_rejects_repeatedly_unsupported_audience(self):
+        self.notice["audience_evidence"] = []
+        with self.assertRaisesRegex(ValueError, "without evidence"):
+            extract_notices(self.model, self.message)
+        self.assertEqual(len(self.requests), 2)
+
     def test_cli_preserves_report_on_failure_and_skips_groq_for_plain_export(self):
         with tempfile.TemporaryDirectory() as tmp, patch("school_reminders.cli.connect"), patch(
             "school_reminders.cli.read_messages", return_value=[self.message]
-        ), patch("school_reminders.cli.GroqNoticeModel.open") as client, patch("builtins.print"), patch.dict(
+        ), patch("school_reminders.cli.GroqNoticeModel.open") as client, patch("builtins.print") as display, patch.dict(
             "os.environ", {"GROQ_API_KEY": "synthetic"}
         ):
             client.return_value.__enter__.return_value = self.model
@@ -80,8 +103,27 @@ class ExtractionTests(unittest.TestCase):
             self.assertEqual(main(args), 0)
             client.assert_not_called()
             self.assertEqual(main(args + ["--classify"]), 0)
+            display.assert_any_call("(no date) | Year 4 trip")
+            display.assert_any_call("  - Bring outdoor clothes | Oak (Year 4)")
             previous = output.read_bytes()
             self.assertEqual(json.loads(previous)[0]["message_id"], self.message.message_id)
             self.result = {"unexpected": True}
             self.assertEqual(main(args + ["--classify"]), 1)
             self.assertEqual(output.read_bytes(), previous)
+
+    def test_display_mixed_audiences_and_empty_messages(self):
+        self.result["notices"].extend([
+            dict(self.notice, classes=[], years=["Year 4"]),
+            dict(self.notice, classes=[], whole_school=True),
+            dict(self.notice, classes=[], review=True, audience_evidence=[]),
+        ])
+        notices = extract_notices(self.model, self.message)
+        output = StringIO()
+        with redirect_stdout(output):
+            _print_classification(replace(self.message, date="20 Nov 2026"), notices)
+            _print_classification(replace(self.message, subject="Second email"), [])
+        lines = output.getvalue().splitlines()
+        self.assertEqual(lines[0], "20 Nov 2026 | Year 4 trip")
+        self.assertEqual([line.split(" | ")[1] for line in lines[1:5]],
+                         ["Oak (Year 4)", "Year 4", "Whole school", "Audience unclear (needs review)"])
+        self.assertEqual(lines[5:], ["(no date) | Second email", "  No notices identified."])

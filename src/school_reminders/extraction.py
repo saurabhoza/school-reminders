@@ -6,13 +6,17 @@ from school_reminders.email.notices import Segment, source_segments
 from school_reminders.groq_model import Citation, GroqNoticeModel, Notice
 
 
+class EvidenceError(ValueError):
+    """A model citation failed local verification."""
+
+
 def _verify(citation: Citation, segments: list[Segment]) -> dict:
     if not 0 <= citation.segment < len(segments) or not citation.quote.strip():
-        raise ValueError("Groq returned an invalid evidence reference.")
+        raise EvidenceError("Groq returned an invalid evidence reference.")
     part = segments[citation.segment]
     offset = part.text.find(citation.quote)
     if offset < 0:
-        raise ValueError("Groq returned a quote absent from its source.")
+        raise EvidenceError("Groq returned a quote absent from its source.")
     start = part.start + offset
     return dict(source=part.source, start=start, end=start + len(citation.quote), quote=citation.quote)
 
@@ -26,7 +30,7 @@ def _validated_notice(notice: Notice, segments: list[Segment]) -> dict:
         raise ValueError("Groq returned conflicting audiences.")
     assigned = bool(notice.whole_school or notice.years or notice.classes)
     if assigned and not notice.audience_evidence:
-        raise ValueError("Groq assigned an audience without evidence.")
+        raise EvidenceError("Groq assigned an audience without evidence.")
     return {
         "title": notice.title,
         "audience": {
@@ -45,4 +49,8 @@ def extract_notices(model: GroqNoticeModel, message: EmailMessage) -> list[dict]
     if not segments:
         return []
     report = model.identify(segments)
+    try:
+        return [_validated_notice(notice, segments) for notice in report.notices]
+    except EvidenceError as error:
+        report = model.identify(segments, correction=str(error))
     return [_validated_notice(notice, segments) for notice in report.notices]

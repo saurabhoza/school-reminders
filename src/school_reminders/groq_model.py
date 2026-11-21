@@ -87,10 +87,18 @@ class GroqNoticeModel:
         with httpx.Client(timeout=45) as client:
             yield cls(client)
 
-    def identify(self, segments: list[Segment]) -> Report:
+    def identify(self, segments: list[Segment], *, correction: str = "") -> Report:
         """Submit one whole email and return a complete, schema-validated report."""
-        payload = [{"field": part.source, "text": part.text} for part in segments]
-        messages = [("system", INSTRUCTIONS), ("human", json.dumps(payload, ensure_ascii=False))]
+        payload = [{"segment": index, "field": part.source, "text": part.text}
+                   for index, part in enumerate(segments)]
+        instructions = INSTRUCTIONS
+        if correction:
+            instructions += (
+                f" The previous report failed local verification: {correction} "
+                "Re-extract the complete report. Use short exact quotes from the labelled segments. "
+                "If you cannot cite an audience, clear its assignments and mark it for review."
+            )
+        messages = [("system", instructions), ("human", json.dumps(payload, ensure_ascii=False))]
         try:
             # Email content is approved for Groq only, including when tracing is configured globally.
             with tracing_context(enabled=False):

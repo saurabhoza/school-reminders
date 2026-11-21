@@ -11,8 +11,8 @@ All three contained HTML and readable text. For each message, the original MIME,
 thread ID, and receipt timestamp matched a second Gmail read by message ID.
 
 Milestone 2 now uses Groq for whole-email notice extraction. The earlier
-passage-by-passage classifier was retired. Nine offline tests pass, including
-four extraction tests with synthetic email and a simulated Groq endpoint.
+passage-by-passage classifier was retired. Offline tests cover Gmail reading,
+extraction with a simulated Groq endpoint, and the per-email classification display.
 The three-message live check above verified Gmail only. Live Groq accuracy
 is pending a free-tier API key and a synthetic pilot.
 
@@ -45,8 +45,10 @@ Acceptance: retrieve matching emails with source evidence without modifying mail
 - [x] Use LangChain's `ChatGroq` integration in `GroqNoticeModel` and strict structured output with
   `openai/gpt-oss-120b`. One request covers the subject and body of one message.
 - [x] Check the returned roster labels and exact supporting quotes locally.
+- [x] Display each classified email's date and subject with the audience for each notice.
   Keep the original email and its Gmail references with the extracted notices.
 - [x] Test the LangChain request, mixed notices, ambiguity, invalid quotes, and export failures offline.
+- [x] Label source segments explicitly and retry an evidence failure once for the affected email.
 - [ ] Run the synthetic live Groq test with a Free organization key, then evaluate
   mixed-year newsletters for missed notices, incorrect audiences and misleading evidence.
 

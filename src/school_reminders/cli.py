@@ -25,12 +25,30 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _print_classification(message: EmailMessage, notices: Sequence[dict]) -> None:
+    print(f"{message.date or '(no date)'} | {message.subject or '(no subject)'}")
+    if not notices:
+        print("  No notices identified.")
+    for notice in notices:
+        audience = notice["audience"]
+        groups = list(audience["years"])
+        groups.extend(f"{name} ({year})" for name, year in audience["class_years"].items())
+        if audience["whole_school"]:
+            groups.append("Whole school")
+        label = ", ".join(groups) or "Audience unclear"
+        if audience["review"]:
+            label += " (needs review)"
+        print(f"  - {notice['title']} | {label}")
+
+
 def _export_messages(messages: Sequence[EmailMessage], output_path: Path, model: GroqNoticeModel | None) -> None:
     rows = []
     for message in messages:
-        row = message.to_dict()
+        row: dict[str, object] = dict(message.to_dict())
         if model is not None:
-            row["notices"] = extract_notices(model, message)
+            notices = extract_notices(model, message)
+            row["notices"] = notices
+            _print_classification(message, notices)
         rows.append(row)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(dir=output_path.parent, delete=False) as temp:

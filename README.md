@@ -115,6 +115,9 @@ takes precedence. The command above sends each subject and body as one request t
 `openai/gpt-oss-120b` using LangChain's `ChatGroq` integration in `GroqNoticeModel`. Groq applies the
 quota and billing plan of the key's organization. The app supplies the 2026–27
 roster shown below. Ordinary Gmail reads without `--classify` use Gmail only.
+As each email is classified, the terminal shows its original date and subject,
+then each notice title and its assigned audience. Uncertain audiences are marked
+for review, and an email with no notices is labelled accordingly.
 
 | Year group | Classes |
 | --- | --- |
@@ -132,7 +135,9 @@ local. The notice list links back to its exported email. Each notice includes
 a title, audience, exact evidence quotes and source offsets. The application
 checks quotes against the decoded source and checks labels against the roster.
 Unclear audiences carry a review flag. These checks establish that quotes exist;
-the model still interprets what they mean. A failed request or validation error
+the model still interprets what they mean. If a quote fails verification or an
+assigned audience lacks evidence, the app asks Groq once to correct that email.
+A failed request or unresolved validation error
 leaves the previous report intact. Attachments and linked pages are outside scope.
 
 To test the model with a synthetic mixed-audience email after setting your key:
