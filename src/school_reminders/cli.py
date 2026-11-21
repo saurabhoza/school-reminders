@@ -4,10 +4,14 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from contextlib import ExitStack
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from school_reminders.domain.email_message import EmailMessage
 from school_reminders.email.gmail import connect, read_messages, validate_sender
+from school_reminders.extraction import extract_notices
+from school_reminders.groq_model import GroqNoticeModel
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -17,15 +21,25 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--credentials", type=Path, default=Path(".secrets/credentials.json"))
     parser.add_argument("--token", type=Path, default=Path(".secrets/token.json"))
     parser.add_argument("--output", type=Path, help="Optional private JSON export, e.g. data/emails.json")
+    parser.add_argument("--classify", action="store_true", help="Send subject and body text to Groq to extract notices")
     return parser
 
 
-def _export_messages(messages: Sequence[EmailMessage], output_path: Path) -> None:
+def _export_messages(messages: Sequence[EmailMessage], output_path: Path, model: GroqNoticeModel | None) -> None:
+    rows = []
+    for message in messages:
+        row = message.to_dict()
+        if model is not None:
+            row["notices"] = extract_notices(model, message)
+        rows.append(row)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps([message.to_dict() for message in messages], indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    with NamedTemporaryFile(dir=output_path.parent, delete=False) as temp:
+        temporary_path = Path(temp.name)
+    try:
+        temporary_path.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+        temporary_path.replace(output_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def _print_summary(messages: Sequence[EmailMessage]) -> None:
@@ -44,14 +58,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.classify and not args.output:
+            parser.error("--classify requires --output for the private classified report")
         sender = validate_sender(args.sender)
         if args.limit < 1:
             parser.error("--limit must be positive")
-        service = connect(args.credentials, args.token)
-        messages = read_messages(service, sender, args.limit)
-        if args.output:
-            _export_messages(messages, args.output)
-        _print_summary(messages)
+        with ExitStack() as resources:
+            model = None
+            if args.classify:
+                model = resources.enter_context(GroqNoticeModel.open())
+            service = connect(args.credentials, args.token)
+            messages = read_messages(service, sender, args.limit)
+            if args.output:
+                _export_messages(messages, args.output, model)
+            if args.classify:
+                print(f"Processed {len(messages)} matching email(s) with Groq.")
+            else:
+                _print_summary(messages)
         return 0
     except (ValueError, OSError) as error:
         print(f"Error: {error}", file=sys.stderr)
