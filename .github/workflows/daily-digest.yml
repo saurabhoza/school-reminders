@@ -38,11 +38,11 @@ jobs:
           SCHOOL_SENDER: ${{ vars.SCHOOL_SENDER || secrets.SCHOOL_SENDER }}
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
           EMAIL_ENABLED: 'true'
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_FROM: s.oza0207@gmail.com
+          EMAIL_TO: s.oza0207@gmail.com
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          SMTP_HOST: ${{ vars.SMTP_HOST }}
-          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_HOST: smtp.gmail.com
+          SMTP_PORT: '465'
           CLASSIFY_NOTICES: ${{ vars.CLASSIFY_NOTICES }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |

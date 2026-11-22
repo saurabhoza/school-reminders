@@ -258,7 +258,9 @@ Gmail receipt time determines which day a message belongs to.
    You can also set it as a repository secret under **Secrets**. If both are
    present, the repository variable takes precedence. Use the repository
    settings because the workflow job has no GitHub environment assigned.
-   Optionally set `SMTP_HOST` and `SMTP_PORT` for another implicit-TLS provider.
+   The workflow sends from and to `info@parentmail.co.uk` using
+   `smtp.gmail.com:465`. Change these workflow values if using another
+   authenticated SMTP provider.
    To include extracted notice titles and audiences, set `CLASSIFY_NOTICES` to
    `true` and add a `GROQ_API_KEY` secret. This opts in to sending the subject,
    body and linked Sway newsletter text to Groq on each run.
