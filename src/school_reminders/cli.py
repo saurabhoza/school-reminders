@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from school_reminders.domain.email_message import EmailMessage
+from school_reminders.email.delivery import EmailDelivery
 from school_reminders.email.gmail import connect, read_messages, validate_sender
 from school_reminders.extraction import extract_notices
 from school_reminders.groq_model import GroqNoticeModel
@@ -25,10 +26,14 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_classification(message: EmailMessage, notices: Sequence[dict]) -> None:
-    print(f"{message.date or '(no date)'} | {message.subject or '(no subject)'}")
+def _email_heading(message: EmailMessage) -> str:
+    return f"{message.date or '(no date)'} | {message.subject or '(no subject)'}"
+
+
+def _print_classification(message: EmailMessage, notices: Sequence[dict]) -> list[str]:
+    lines = [_email_heading(message)]
     if not notices:
-        print("  No notices identified.")
+        lines.append("  No notices identified.")
     for notice in notices:
         audience = notice["audience"]
         groups = list(audience["years"])
@@ -38,17 +43,21 @@ def _print_classification(message: EmailMessage, notices: Sequence[dict]) -> Non
         label = ", ".join(groups) or "Audience unclear"
         if audience["review"]:
             label += " (needs review)"
-        print(f"  - {notice['title']} | {label}")
+        lines.append(f"  - {notice['title']} | {label}")
+    for line in lines:
+        print(line)
+    return lines
 
 
-def _export_messages(messages: Sequence[EmailMessage], output_path: Path, model: GroqNoticeModel | None) -> None:
+def _export_messages(messages: Sequence[EmailMessage], output_path: Path, model: GroqNoticeModel | None) -> list[str]:
     rows = []
+    notice_lines = []
     for message in messages:
         row: dict[str, object] = dict(message.to_dict())
         if model is not None:
             notices = extract_notices(model, message)
             row["notices"] = notices
-            _print_classification(message, notices)
+            notice_lines.extend(_print_classification(message, notices))
         rows.append(row)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(dir=output_path.parent, delete=False) as temp:
@@ -58,6 +67,7 @@ def _export_messages(messages: Sequence[EmailMessage], output_path: Path, model:
         temporary_path.replace(output_path)
     finally:
         temporary_path.unlink(missing_ok=True)
+    return notice_lines
 
 
 def _print_summary(messages: Sequence[EmailMessage]) -> None:
@@ -81,18 +91,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         sender = validate_sender(args.sender)
         if args.limit < 1:
             parser.error("--limit must be positive")
+        delivery = EmailDelivery.configured()
         with ExitStack() as resources:
             model = None
             if args.classify:
                 model = resources.enter_context(GroqNoticeModel.open())
             service = connect(args.credentials, args.token)
             messages = read_messages(service, sender, args.limit)
+            lines = []
             if args.output:
-                _export_messages(messages, args.output, model)
+                lines = _export_messages(messages, args.output, model)
             if args.classify:
                 print(f"Processed {len(messages)} matching email(s) with Groq.")
             else:
                 _print_summary(messages)
+                lines = [_email_heading(message) for message in messages]
+        if delivery:
+            delivery.send([f"{len(messages)} matching email(s).", "", *lines])
+            print("SMTP server accepted the scan digest.")
         return 0
     except (ValueError, OSError) as error:
         print(f"Error: {error}", file=sys.stderr)

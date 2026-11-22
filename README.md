@@ -152,6 +152,32 @@ Run offline tests after installation:
 python -m unittest discover -s tests/unit -v
 ```
 
+## Email the completed scan
+
+Append the following settings to the existing private `.secrets/.env`:
+
+```dotenv
+EMAIL_ENABLED=true
+EMAIL_FROM=your-sending-account@gmail.com
+EMAIL_TO=your-recipient@example.com
+SMTP_PASSWORD=your-app-password
+```
+
+For Gmail, enable 2-Step Verification on the sending account and generate an
+[app password](https://support.google.com/accounts/answer/185833) if your account
+supports it. Enter it without the display spaces. The defaults are
+`SMTP_HOST=smtp.gmail.com` and `SMTP_PORT=465`. Another provider can be used
+with its implicit-TLS host and port, using the sender address as the login.
+Environment variables take precedence over the file. Gmail scanning continues
+to use its separate read-only OAuth credentials.
+
+Run the usual scan command. After the scan and any requested export finish, the
+app sends one plain-text email with the count, dates, and subjects. Classified
+scans include notice titles and audience labels. Empty scans send a zero count.
+A failed scan or export skips delivery. An SMTP failure returns an error and
+preserves the export. Rerunning a successful scan sends a fresh digest.
+Set `EMAIL_ENABLED=false` to disable sending.
+
 ## Python development guidance
 
 Repository skills in [.agents/skills](.agents/skills/) cover practical SOLID

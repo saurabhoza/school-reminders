@@ -1,6 +1,6 @@
 # Implementation plan
 
-## Progress as of 21 November 2026
+## Progress as of 22 November 2026
 
 Milestone 1 is complete. All five offline tests passed, covering
 sender verification and pagination, plain-text source preservation, HTML fallback,
@@ -85,10 +85,13 @@ allowance and spending controls before enabling the workflow.
   Catch up after delayed or missed runs, and ensure retries do not send duplicates.
 - [ ] Test a scheduled synthetic run and a repeated run before enabling live mail.
 
-- [ ] Agree delivery channel and reminder timing.
+- [x] Send one plain-text email digest after a completed scan and requested export.
+  The SMTP sender and recipient are configured separately from read-only Gmail OAuth.
+- [ ] Verify live delivery with the configured sender and recipient.
+- [ ] Agree event reminder timing.
 - [ ] Add scheduled ingestion, incremental checkpoints, retries, and error reporting.
 - [ ] Prevent duplicate reminders; provide review for uncertain activities.
 - [ ] Add explicitly invoked integration tests and deployment instructions.
 
 Next, verify Groq on synthetic notices. Attachment and linked-document handling,
-durable storage, and the reminder delivery channel remain open decisions.
+durable storage, and event reminder timing remain open decisions.

@@ -95,7 +95,7 @@ class ExtractionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch("school_reminders.cli.connect"), patch(
             "school_reminders.cli.read_messages", return_value=[self.message]
         ), patch("school_reminders.cli.GroqNoticeModel.open") as client, patch("builtins.print") as display, patch.dict(
-            "os.environ", {"GROQ_API_KEY": "synthetic"}
+            "os.environ", {"GROQ_API_KEY": "synthetic", "EMAIL_ENABLED": "false"}
         ):
             client.return_value.__enter__.return_value = self.model
             output = Path(tmp) / "report.json"
