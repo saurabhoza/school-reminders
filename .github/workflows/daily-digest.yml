@@ -35,7 +35,7 @@ jobs:
         shell: bash
         env:
           RECEIVED_DAY: ${{ inputs.received_day }}
-          SCHOOL_SENDER: ${{ vars.SCHOOL_SENDER }}
+          SCHOOL_SENDER: ${{ vars.SCHOOL_SENDER || secrets.SCHOOL_SENDER }}
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
           EMAIL_ENABLED: 'true'
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
@@ -47,7 +47,7 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -euo pipefail
-          : "${SCHOOL_SENDER:?Set the SCHOOL_SENDER repository variable}"
+          : "${SCHOOL_SENDER:?Set SCHOOL_SENDER under Settings > Secrets and variables > Actions as a repository variable or secret. This job has no GitHub environment.}"
           : "${GMAIL_TOKEN_JSON:?Set the GMAIL_TOKEN_JSON repository secret}"
           : "${EMAIL_FROM:?Set the EMAIL_FROM repository secret}"
           : "${EMAIL_TO:?Set the EMAIL_TO repository secret}"
@@ -58,14 +58,20 @@ jobs:
           printf '%s' "$GMAIL_TOKEN_JSON" > "$private_dir/token.json"
           unset GMAIL_TOKEN_JSON
           day=${RECEIVED_DAY:-$(TZ=Europe/London date --date=yesterday +%F)}
-          args=(--sender "$SCHOOL_SENDER" --token "$private_dir/token.json" --non-interactive --received-day "$day")
+          args=(--sender "$SCHOOL_SENDER" --token "$private_dir/token.json" --non-interactive --safe-diagnostics --received-day "$day")
           if [[ "$CLASSIFY_NOTICES" == true ]]; then
             : "${GROQ_API_KEY:?Set GROQ_API_KEY for classified digests}"
             args+=(--classify --output "$private_dir/notices.json")
           fi
-          # The interactive CLI prints private subjects and provider errors.
-          if ! python -m school_reminders "${args[@]}" >/dev/null 2>&1; then
-            echo "::error::Digest failed. Check the date, OAuth token, SMTP settings and any enabled classifier. Check your inbox before retrying."
-            exit 1
+          # Keep provider logs and argument values on stderr out of Actions logs.
+          if python -m school_reminders "${args[@]}" 2>/dev/null; then
+            exit 0
+          else
+            status=$?
+            if [[ "$status" == 2 ]]; then
+              echo "::error::Invalid scan arguments. Enter the receipt date as YYYY-MM-DD."
+            else
+              echo "::error::Daily digest failed. See the stage diagnostic above. If no diagnostic appears, check that the application installed and started."
+            fi
+            exit "$status"
           fi
-          echo 'SMTP server accepted the daily digest.'

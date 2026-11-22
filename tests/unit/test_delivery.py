@@ -1,11 +1,13 @@
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 from school_reminders.cli import main
-from school_reminders.email.delivery import EmailDelivery
+from school_reminders.email.delivery import DeliveryAuthenticationError, EmailDelivery
 
 
 class EmailDeliveryTests(unittest.TestCase):
@@ -63,3 +65,20 @@ class EmailDeliveryTests(unittest.TestCase):
         start, end = read.call_args.kwargs["received_between"]
         self.assertEqual(end - start, 25 * 3600)
         self.assertIn("0 matching email(s) received on 2026-10-25 (Europe/London).", send.call_args.args[0])
+
+    def test_safe_diagnostics_hide_provider_errors(self):
+        args = ["--sender", "school@example.com", "--safe-diagnostics", "--non-interactive"]
+        with redirect_stdout(StringIO()) as log, patch(
+            "school_reminders.cli.connect", side_effect=RuntimeError("private OAuth response")
+        ):
+            self.assertEqual(main(args), 1)
+        self.assertEqual(
+            log.getvalue(),
+            "Error: Gmail OAuth setup or refresh failed. Check GMAIL_TOKEN_JSON and reauthorize locally if needed.\n",
+        )
+
+        with redirect_stdout(StringIO()) as log, patch("school_reminders.cli.connect"), patch(
+            "school_reminders.cli.read_messages", return_value=[]
+        ), patch.object(EmailDelivery, "send", side_effect=DeliveryAuthenticationError("private SMTP response")):
+            self.assertEqual(main(args), 1)
+        self.assertEqual(log.getvalue(), "Error: SMTP authentication failed. Check EMAIL_FROM and SMTP_PASSWORD.\n")

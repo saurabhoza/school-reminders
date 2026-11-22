@@ -10,6 +10,10 @@ from email.message import EmailMessage
 from dotenv import dotenv_values
 
 
+class DeliveryAuthenticationError(ValueError):
+    """The SMTP server rejected the configured login."""
+
+
 @dataclass(frozen=True)
 class EmailDelivery:
     sender: str
@@ -55,6 +59,8 @@ class EmailDelivery:
                 smtp.login(self.sender, self.password)
                 smtp.send_message(digest)
         except smtplib.SMTPAuthenticationError as error:
-            raise ValueError("SMTP authentication failed. Check EMAIL_FROM and SMTP_PASSWORD.") from error
+            raise DeliveryAuthenticationError(
+                "SMTP authentication failed. Check EMAIL_FROM and SMTP_PASSWORD."
+            ) from error
         except OSError as error:
             raise ValueError("Email delivery failed. Check SMTP settings and the recipient inbox before retrying.") from error

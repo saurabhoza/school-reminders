@@ -255,6 +255,9 @@ Gmail receipt time determines which day a message belongs to.
    SMTP settings above. If Google revokes the grant, authorize locally again
    and replace the token secret.
 3. Under **Variables**, set `SCHOOL_SENDER` to the school's exact From address.
+   You can also set it as a repository secret under **Secrets**. If both are
+   present, the repository variable takes precedence. Use the repository
+   settings because the workflow job has no GitHub environment assigned.
    Optionally set `SMTP_HOST` and `SMTP_PORT` for another implicit-TLS provider.
    To include extracted notice titles and audiences, set `CLASSIFY_NOTICES` to
    `true` and add a `GROQ_API_KEY` secret. This opts in to sending the subject,
@@ -266,8 +269,9 @@ Gmail receipt time determines which day a message belongs to.
    inbox before repeating a date. Missed days require manual backfill.
 
 The runner discards the temporary OAuth token and any classified export.
-The delivery step reports success or failure and keeps private mail out of
-the Actions log. GitHub may delay scheduled runs under load.
+The delivery step reports which stage failed, such as Gmail OAuth or SMTP
+authentication, while keeping private mail and provider responses out of the
+Actions log. GitHub may delay scheduled runs under load.
 [GitHub schedule documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
 ## Python development guidance
