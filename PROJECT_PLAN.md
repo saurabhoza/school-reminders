@@ -22,7 +22,7 @@ application responsibilities now separate CLI, OAuth, Gmail I/O, and MIME parsin
 Email integration lives in `email/`; domain value objects live in `domain/`.
 Linting and static type-checking enforcement remain future development tooling work.
 The refactor preserves CLI/export contracts and current interactive authorization
-behavior; non-interactive server authorization remains future work.
+behavior. The daily workflow refreshes a locally authorized token unattended.
 
 ## 1. Gmail reading — complete
 
@@ -41,9 +41,12 @@ Acceptance: retrieve matching emails with source evidence without modifying mail
 ## 2. Extract notices with Groq — implemented, live verification pending
 
 - [x] Use the supplied 2026–27 Reception to Year 6 roster and whole-school category.
-- [ ] Decide scope for attachments, newsletters, forwarded content, and linked documents.
+- [x] Read direct public Microsoft Sway newsletters during classification and retain cited text snapshots.
+- [x] Expose verified extraction as a Python helper for pasted email bodies or standalone Sway URLs.
+- [ ] Decide scope for attachments, media, forwarded content, and other linked documents.
 - [x] Use LangChain's `ChatGroq` integration in `GroqNoticeModel` and strict structured output with
-  `openai/gpt-oss-120b`. One request covers the subject and body of one message.
+  `openai/gpt-oss-120b`. Extraction starts with the whole message and linked Sway text,
+  then splits the source if Groq reports an input or output size limit.
 - [x] Check the returned roster labels and exact supporting quotes locally.
 - [x] Display each classified email's date and subject with the audience for each notice.
   Keep the original email and its Gmail references with the extracted notices.
@@ -72,15 +75,16 @@ Acceptance: retrieve matching emails with source evidence without modifying mail
 
 ## 5. Reminders and operation
 
-Planned host: a private GitHub repository with a standard Linux Actions runner.
-Schedule one daily run on the default branch, away from the top of the hour
-(proposed 07:17 Europe/London), plus a manual trigger for retries. Five minutes
+The daily digest workflow targets a private GitHub repository with a standard
+Linux Actions runner. It is scheduled for 07:17 Europe/London on the default
+branch and supports manual backfill by receipt date. Five minutes
 per day is about 155 runner minutes in a 31-day month. Confirm available account
 allowance and spending controls before enabling the workflow.
 [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
 
-- [ ] Configure read-only Gmail OAuth for unattended use, put credentials and
-  the Groq key in Actions secrets, and keep private message details out of logs.
+- [x] Implement unattended read-only Gmail OAuth, Actions secret inputs, private
+  logging and SMTP digest delivery for the previous London calendar day.
+- [ ] Configure repository secrets and verify the first hosted delivery.
 - [ ] Persist checkpoints and sent-reminder IDs outside the temporary runner.
   Catch up after delayed or missed runs, and ensure retries do not send duplicates.
 - [ ] Test a scheduled synthetic run and a repeated run before enabling live mail.
@@ -89,9 +93,9 @@ allowance and spending controls before enabling the workflow.
   The SMTP sender and recipient are configured separately from read-only Gmail OAuth.
 - [ ] Verify live delivery with the configured sender and recipient.
 - [ ] Agree event reminder timing.
-- [ ] Add scheduled ingestion, incremental checkpoints, retries, and error reporting.
+- [ ] Add incremental checkpoints and safe automated catch-up after missed runs.
 - [ ] Prevent duplicate reminders; provide review for uncertain activities.
 - [ ] Add explicitly invoked integration tests and deployment instructions.
 
-Next, verify Groq on synthetic notices. Attachment and linked-document handling,
+Next, verify Groq on synthetic notices. Attachment and other linked-document handling,
 durable storage, and event reminder timing remain open decisions.

@@ -111,7 +111,7 @@ GROQ_API_KEY=your_key_here
 
 Replace the placeholder with the key from your Groq Free organization. Run commands
 from the project folder. Git ignores this file. A key supplied in the environment
-takes precedence. The command above sends each subject and body as one request to
+takes precedence. The command above sends each subject, body and linked Sway newsletter text together to
 `openai/gpt-oss-120b` using LangChain's `ChatGroq` integration in `GroqNoticeModel`. Groq applies the
 quota and billing plan of the key's organization. The app supplies the 2026–27
 roster shown below. Ordinary Gmail reads without `--classify` use Gmail only.
@@ -138,7 +138,50 @@ Unclear audiences carry a review flag. These checks establish that quotes exist;
 the model still interprets what they mean. If a quote fails verification or an
 assigned audience lacks evidence, the app asks Groq once to correct that email.
 A failed request or unresolved validation error
-leaves the previous report intact. Attachments and linked pages are outside scope.
+leaves the previous report intact.
+
+If Groq rejects the request size or reaches its output token limit, the reader
+processes smaller portions and combines the verified notices in source order.
+For long newsletters, Groq selects numbered source passages and the reader copies
+the selected text directly. Short newsletters also use this fallback if a quote
+still fails verification after correction.
+Evidence offsets still refer to the original email or newsletter snapshot.
+
+During classification, the reader follows direct public Microsoft Sway links in the
+email and reads each newsletter once, even if the thumbnail, title and button all
+link to it. It includes the newsletter title, text cards and available image
+descriptions. The private export stores each newsletter's URL and retrieved text
+under `newsletters`. A citation with source `newsletter_1` uses offsets into
+`newsletters.newsletter_1.text`. An unreadable Sway fails the scan so an incomplete
+newsletter cannot be reported as having no notices. Image-only text, video/audio,
+attachments and the contents of onward links are outside the current reader's coverage.
+
+### Parse email content or a Sway URL from Python
+
+In PyCharm, open the project-root `run_notices.py`, edit `EMAIL_CONTENT` and
+optionally `EMAIL_SUBJECT`, then run the file. Set `EMAIL_IS_HTML = True` for an
+HTML body. To process a newsletter directly, fill in `SWAY_URL`. Clear it to
+switch back to the email. The Run window displays the notices. Keep real school
+content and private newsletter links out of commits.
+
+With `GROQ_API_KEY` configured, call `parse_notices` directly from Python.
+The helper runs independently of Gmail, the JSON export and email delivery.
+
+```python
+from school_reminders.extraction import parse_notices
+
+report = parse_notices("Oak should bring a hat on Friday.", subject="Class trip")
+for notice in report["notices"]:
+    print(notice["title"], notice["audience"], notice["evidence"])
+
+# With a public newsletter URL copied from an email
+newsletter_report = parse_notices(sway_url)
+```
+
+Pass `html=True` for an HTML body. Both input forms return a dictionary with
+`notices` and `newsletters`. The latter holds any linked source snapshots.
+An empty notice list means the model found no notices. Input, retrieval and
+model validation errors raise `ValueError`.
 
 To test the model with a synthetic mixed-audience email after setting your key:
 
@@ -177,6 +220,36 @@ scans include notice titles and audience labels. Empty scans send a zero count.
 A failed scan or export skips delivery. An SMTP failure returns an error and
 preserves the export. Rerunning a successful scan sends a fresh digest.
 Set `EMAIL_ENABLED=false` to disable sending.
+
+## Daily digest on GitHub Actions
+
+The **Daily school digest** workflow runs at **07:17 Europe/London** and emails
+one digest for the previous London calendar day. It includes every matching
+message's date and subject, including a zero-count report on quiet days.
+Gmail receipt time determines which day a message belongs to.
+
+1. Complete Gmail authorization locally using the steps above. In the private
+   GitHub repository, open **Settings → Secrets and variables → Actions**.
+2. Under **Secrets**, create `GMAIL_TOKEN_JSON` with the complete contents of
+   the authorized `.secrets/token.json` (including its refresh token). Add
+   `EMAIL_FROM`, `EMAIL_TO` and `SMTP_PASSWORD` as separate secrets using the
+   SMTP settings above. If Google revokes the grant, authorize locally again
+   and replace the token secret.
+3. Under **Variables**, set `SCHOOL_SENDER` to the school's exact From address.
+   Optionally set `SMTP_HOST` and `SMTP_PORT` for another implicit-TLS provider.
+   To include extracted notice titles and audiences, set `CLASSIFY_NOTICES` to
+   `true` and add a `GROQ_API_KEY` secret. This opts in to sending the subject,
+   body and linked Sway newsletter text to Groq on each run.
+4. Enable Actions and merge the workflow and application changes into the
+   default branch. For a first delivery, open **Actions → Daily school digest →
+   Run workflow**. Leave the date blank for yesterday or enter a missed day
+   as `YYYY-MM-DD`. Each successful invocation sends a digest, so check your
+   inbox before repeating a date. Missed days require manual backfill.
+
+The runner discards the temporary OAuth token and any classified export.
+The delivery step reports success or failure and keeps private mail out of
+the Actions log. GitHub may delay scheduled runs under load.
+[GitHub schedule documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
 ## Python development guidance
 

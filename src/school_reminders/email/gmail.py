@@ -30,7 +30,7 @@ def validate_sender(sender: str) -> str:
     return sender
 
 
-def connect(credentials_path: Path, token_path: Path) -> Resource:
+def connect(credentials_path: Path | None, token_path: Path) -> Resource:
     """Build a Gmail client using cached, refreshed, or interactive credentials.
 
     May open a browser through OAuth. Google API errors are left intact for the
@@ -60,7 +60,10 @@ def _matches_sender(message: EmailMessage, sender: str) -> bool:
     return sender.casefold() in addresses
 
 
-def read_messages(service: Resource, sender: str, limit: int = 20) -> list[EmailMessage]:
+def read_messages(
+    service: Resource, sender: str, limit: int | None = 20, *,
+    received_between: tuple[int, int] | None = None,
+) -> list[EmailMessage]:
     """Return up to ``limit`` emails whose From address matches ``sender``.
 
     Follows Gmail result pages, excluding spam/trash by the API default. Gmail
@@ -72,21 +75,30 @@ def read_messages(service: Resource, sender: str, limit: int = 20) -> list[Email
         HttpError: If a Gmail API request fails (propagated unchanged).
     """
     sender = validate_sender(sender)
-    if limit < 1:
+    if limit is not None and limit < 1:
         raise ValueError("Limit must be positive.")
 
+    query = f"from:({sender})"
+    if received_between is not None:
+        start, end = received_between
+        if start >= end:
+            raise ValueError("Receipt window must have a positive duration.")
+        # Widen the lower search bound to include mail at exactly midnight.
+        query += f" after:{start - 1} before:{end}"
     messages: list[EmailMessage] = []
     page_token: str | None = None
     messages_api = service.users().messages()
-    while len(messages) < limit:
+    while limit is None or len(messages) < limit:
         page = messages_api.list(
             userId="me",
-            q=f"from:({sender})",
-            maxResults=min(MAX_PAGE_SIZE, limit - len(messages)),
+            q=query,
+            maxResults=MAX_PAGE_SIZE if limit is None else min(MAX_PAGE_SIZE, limit - len(messages)),
             pageToken=page_token,
         ).execute()
         for item in page.get("messages", []):
             message = _get_message(messages_api, item["id"])
+            if received_between is not None and not start * 1000 <= int(message.internal_date_ms) < end * 1000:
+                continue
             if _matches_sender(message, sender):
                 messages.append(message)
         page_token = page.get("nextPageToken")

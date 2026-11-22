@@ -10,8 +10,8 @@ from unittest.mock import patch
 import httpx
 from school_reminders.groq_model import GroqNoticeModel
 
-from school_reminders.cli import _print_classification, main
-from school_reminders.extraction import extract_notices
+from school_reminders.cli import _export_messages, _print_classification, main
+from school_reminders.extraction import extract_notices, parse_notices
 from school_reminders.gmail import normalize_message
 from test_gmail import resource
 
@@ -36,10 +36,13 @@ class ExtractionTests(unittest.TestCase):
 
     def respond(self, request):
         self.requests.append(json.loads(request.content))
+        result = next(self.responses, self.result)
+        if isinstance(result, httpx.Response):
+            return result
         return httpx.Response(200, json={
             "id": "test", "created": 0, "model": "test", "object": "chat.completion",
             "choices": [{"index": 0, "finish_reason": "stop", "message": {
-                "role": "assistant", "content": json.dumps(next(self.responses, self.result))}}],
+                "role": "assistant", "content": json.dumps(result)}}],
         })
 
     def test_whole_email_request_and_source_evidence(self):
@@ -58,6 +61,40 @@ class ExtractionTests(unittest.TestCase):
                          ["Year 4 trip", "Oak", "Bring hats &amp; coats.", "All classes finish early."])
         self.assertTrue(request["response_format"]["json_schema"]["strict"])
 
+    def test_parse_pasted_email_and_standalone_sway(self):
+        text = "  Oak should bring hats."
+        url = "https://sway.cloud.microsoft/SyntheticIssue"
+        snapshots = {"newsletter_1": {"url": url, "text": text}}
+        with patch.object(GroqNoticeModel, "open") as open_model:
+            open_model.return_value.__enter__.return_value = self.model
+            for content, options, field, index in [
+                (text, {"subject": "Class trip"}, "text", 1),
+                (f"<p>{text}</p>", {"html": True}, "html", 0),
+                (url, {}, "newsletter_1", 0),
+            ]:
+                self.notice.update(evidence=[dict(segment=index, quote="bring hats")],
+                                   audience_evidence=[dict(segment=index, quote="Oak")])
+                with self.subTest(field=field), patch(
+                    "school_reminders.extraction.newsletters_from_content",
+                    return_value=snapshots if content == url else {},
+                ) as read:
+                    report = parse_notices(content, **options)
+                    if content == url:
+                        read.assert_called_once_with(url, "")
+                        self.assertEqual(report["newsletters"], snapshots)
+                    notice, = report["notices"]
+                    quote, = notice["evidence"]
+                    source = text if content == url else content
+                    self.assertEqual(quote["source"], field)
+                    self.assertEqual(source[quote["start"]:quote["end"]], "bring hats")
+
+    def test_parse_rejects_empty_or_unsupported_url_before_opening_model(self):
+        with patch.object(GroqNoticeModel, "open") as open_model:
+            for value in ("  ", "https://example.org/school"):
+                with self.assertRaises(ValueError):
+                    parse_notices(value)
+            open_model.assert_not_called()
+
     def test_invalid_evidence_roster_and_structure(self):
         for change in ({"evidence": [dict(segment=2, quote="invented")]},
                        {"classes": ["Unknown"]}, {"review": "yes"},
@@ -65,6 +102,62 @@ class ExtractionTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.result = {"notices": [dict(self.notice, **change)]}
                 extract_notices(self.model, self.message)
+
+    def test_oversized_newsletter_is_split_without_losing_text_or_offsets(self):
+        text = "Oak hats.\nOak coats."
+        self.responses = iter([
+            httpx.Response(413, json={"error": {"message": "Request too large"}}),
+            *({"notices": [dict(self.notice, evidence=[dict(segment=0, quote=word)],
+                                audience_evidence=[dict(segment=0, quote="Oak")])]}
+              for word in ("hats", "coats")),
+        ])
+        notices = extract_notices(self.model, replace(self.message, subject="", html="", text=""),
+                                  newsletters={"newsletter_1": {"text": text}})
+        halves = [json.loads(req["messages"][1]["content"])[0]["text"] for req in self.requests[1:]]
+        self.assertEqual("".join(halves), text)
+        self.assertEqual([n["audience_evidence"][0]["start"] for n in notices], [0, text.rindex("Oak")])
+        for notice in notices:
+            quote, = notice["evidence"]
+            self.assertEqual(text[quote["start"]:quote["end"]], quote["quote"])
+
+    def test_classified_export_reads_sway_once_and_preserves_newsletter_evidence(self):
+        url = "https://sway.cloud.microsoft/SyntheticIssue"
+        message = replace(self.message, html=f'<a href="{url}?ref=email">Weekly</a>',
+                          text=f"{url}\nhttps://sway.cloud.microsoft.example.org/Other")
+        viewer = ('var CommonSettings={"ClientDevice":"Desktop","UserSessionId":"session",'
+                  '"AnonUserId":"anon","Canary":"synthetic"};var StoryPageSettings='
+                  '{"ClientVersion":123,"StoryId":"story","LookupId":"SyntheticIssue"};')
+        root = {"type": "Node-RenderModelRoot", "props": {"Title": "School news"}, "children": [
+            {"type": "Node-TextRunElement", "props": {"Text": "Oak should bring hats."}},
+        ]}
+        requests = []
+
+        def respond(request):
+            requests.append(request)
+            if request.method == "GET":
+                self.assertEqual(str(request.url), url)
+                return httpx.Response(200, text=viewer)
+            self.assertEqual(request.url.path, "/s/SyntheticIssue/get")
+            return httpx.Response(200, json={"StoryDiff": {"propBags": [root]}})
+
+        self.notice.update(evidence=[dict(segment=2, quote="bring hats")],
+                           audience_evidence=[dict(segment=2, quote="Oak")])
+        client = httpx.Client(transport=httpx.MockTransport(respond))
+        with tempfile.TemporaryDirectory() as tmp, patch("school_reminders.email.sway.httpx.Client",
+                                                        return_value=client), redirect_stdout(StringIO()):
+            output = Path(tmp) / "report.json"
+            _export_messages([message], output, None)
+            self.assertEqual(requests, [])
+            _export_messages([message], output, self.model)
+            row, = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(len(requests), 2)
+        quote, = row["notices"][0]["evidence"]
+        snapshot = row["newsletters"][quote["source"]]
+        self.assertEqual(snapshot["url"], url)
+        self.assertEqual(snapshot["text"][quote["start"]:quote["end"]], "bring hats")
+        payload = json.loads(self.requests[0]["messages"][1]["content"])
+        self.assertEqual(payload[-1]["text"], "School news\nOak should bring hats.")
+        self.assertNotIn("synthetic", str(payload).lower())
 
     def test_ambiguous_and_empty_results(self):
         self.notice.update(classes=[], audience_evidence=[])
@@ -84,6 +177,28 @@ class ExtractionTests(unittest.TestCase):
                 self.assertIn("previous report failed", self.requests[1]["messages"][0]["content"])
                 payload = json.loads(self.requests[1]["messages"][1]["content"])
                 self.assertEqual([part["segment"] for part in payload], list(range(len(payload))))
+
+    def test_newsletter_can_cite_original_passages_after_failed_quote_correction(self):
+        invalid = {"notices": [dict(self.notice, evidence=[dict(segment=0, quote="invented")])]}
+        self.responses = iter([invalid, invalid, {"notices": [
+            dict(self.notice, evidence=[1], audience_evidence=[0])
+        ]}])
+        text = "Oak\nBring hats."
+        notice, = extract_notices(self.model, replace(self.message, subject="", html="", text=""),
+                                  newsletters={"newsletter_1": {"text": text}})
+        self.assertEqual(notice["evidence"], [
+            dict(source="newsletter_1", start=4, end=len(text), quote="Bring hats.")
+        ])
+
+    def test_long_newsletter_selects_numbered_passages_directly(self):
+        text = "Introduction. " * 300 + "\nOak should bring hats."
+        self.responses = iter([{"notices": [dict(self.notice, evidence=[1], audience_evidence=[1])]}])
+        notice, = extract_notices(self.model, replace(self.message, subject="", html="", text=""),
+                                  newsletters={"newsletter_1": {"text": text}})
+        request, = self.requests
+        self.assertEqual(json.loads(request["messages"][1]["content"])[1],
+                         [1, "newsletter_1", "Oak should bring hats."])
+        self.assertEqual(notice["evidence"][0]["start"], text.index("Oak"))
 
     def test_rejects_repeatedly_unsupported_audience(self):
         self.notice["audience_evidence"] = []

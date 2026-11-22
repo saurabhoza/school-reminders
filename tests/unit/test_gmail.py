@@ -41,6 +41,20 @@ class GmailTests(unittest.TestCase):
         service.users.return_value.messages.return_value.list.return_value.execute.return_value = {}
         self.assertEqual(read_messages(service, "school@example.com"), [])
 
+    def test_daily_window_includes_only_matching_receipt_times(self):
+        service = MagicMock()
+        api = service.users.return_value.messages.return_value
+        api.list.return_value.execute.side_effect = [
+            {"messages": [{"id": "a"}, {"id": "b"}], "nextPageToken": "more"},
+            {"messages": [{"id": "c"}, {"id": "d"}]},
+        ]
+        api.get.return_value.execute.side_effect = [
+            dict(resource("Trip"), internalDate=str(ms)) for ms in (999, 1000, 1999, 2000)
+        ]
+        emails = read_messages(service, "school@example.com", None, received_between=(1, 2))
+        self.assertEqual([email.internal_date_ms for email in emails], ["1000", "1999"])
+        self.assertEqual(api.list.call_args.kwargs["q"], "from:(school@example.com) after:0 before:2")
+
     def test_invalid_input(self):
         with self.assertRaises(ValueError):
             validate_sender("school@example.com OR from:other@example.com")

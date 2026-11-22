@@ -60,12 +60,17 @@ class _HTMLSegments(HTMLParser):
 
 def source_segments(message: EmailMessage) -> list[Segment]:
     """Use original HTML when present, since message.text can be HTML-derived."""
-    parts = [Segment("subject", 0, message.subject)]
-    if message.html:
-        parser = _HTMLSegments(message.html)
-        parser.feed(message.html)
+    return content_segments(message.subject, message.text, message.html)
+
+
+def content_segments(subject: str, text: str, html: str) -> list[Segment]:
+    """Build evidence segments from a decoded subject and body."""
+    parts = [Segment("subject", 0, subject)]
+    if html:
+        parser = _HTMLSegments(html)
+        parser.feed(html)
         parser.close()
         parts.extend(parser.segments)
     else:
-        parts.append(Segment("text", 0, message.text))
+        parts.append(Segment("text", 0, text))
     return [part for part in parts if part.text.strip()]

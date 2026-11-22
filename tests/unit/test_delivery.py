@@ -50,3 +50,16 @@ class EmailDeliveryTests(unittest.TestCase):
             with patch("school_reminders.cli._export_messages", side_effect=OSError("failed")):
                 self.assertEqual(main(args), 1)
             send.assert_called_once()
+
+    def test_daily_digest_covers_london_clock_change(self):
+        with patch("school_reminders.cli.connect") as connect, patch(
+            "school_reminders.cli.read_messages", return_value=[]
+        ) as read, patch.object(EmailDelivery, "send") as send, patch("builtins.print"):
+            result = main(["--sender", "school@example.com", "--received-day", "2026-10-25",
+                           "--non-interactive"])
+        self.assertEqual(result, 0)
+        self.assertIsNone(connect.call_args.args[0])
+        self.assertIsNone(read.call_args.args[2])
+        start, end = read.call_args.kwargs["received_between"]
+        self.assertEqual(end - start, 25 * 3600)
+        self.assertIn("0 matching email(s) received on 2026-10-25 (Europe/London).", send.call_args.args[0])

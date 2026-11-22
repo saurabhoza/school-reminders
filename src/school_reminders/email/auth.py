@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 
-def load_credentials(credentials_path: Path, token_path: Path) -> Credentials:
+def load_credentials(credentials_path: Path | None, token_path: Path) -> Credentials:
     """Reuse or refresh a token, or authorize interactively when none is usable.
 
     Opens a browser and a local callback server only when authorization is
@@ -33,6 +33,8 @@ def load_credentials(credentials_path: Path, token_path: Path) -> Credentials:
     if credentials and credentials.expired and credentials.refresh_token:
         credentials.refresh(Request())
     else:
+        if credentials_path is None:
+            raise ValueError("Unattended Gmail access requires a locally authorized refresh token.")
         if not credentials_path.is_file():
             raise FileNotFoundError(
                 f"OAuth credentials missing: {credentials_path}. See README.md for setup."
