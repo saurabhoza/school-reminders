@@ -1,0 +1,28 @@
+[project]
+name = "school-reminders"
+version = "0.1.0"
+description = "A basic Python project for school reminders."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "tzdata; sys_platform == 'win32'",
+    "python-dotenv>=1,<2",
+    "langchain-groq>=1,<2",
+    "httpx>=0.23,<1",
+    "langsmith>=0.3,<1",
+    "groq>=0.30,<2",
+    "pydantic>=2,<3",
+    "google-api-python-client>=2.0,<3",
+    "google-auth>=2.0,<3",
+    "google-auth-oauthlib>=1.2,<2",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+school-reminders = "school_reminders.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
