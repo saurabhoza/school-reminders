@@ -140,11 +140,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if not args.safe_diagnostics:
                     _print_summary(messages)
                 lines = [_email_heading(message) for message in messages]
-        if delivery:
+        if delivery and messages:
             diagnostic = "SMTP delivery failed. Check SMTP_HOST and SMTP_PORT, then check your inbox before retrying."
             period = f" received on {args.received_day} (Europe/London)" if args.received_day else ""
             delivery.send([f"{len(messages)} matching email(s){period}.", "", *lines])
             print("SMTP server accepted the scan digest.")
+        elif delivery and not args.safe_diagnostics:
+            print("No matching emails found. No digest sent.")
         return 0
     except Exception as error:
         if isinstance(error, ImportError):

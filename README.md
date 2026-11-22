@@ -234,8 +234,9 @@ Environment variables take precedence over the file. Gmail scanning continues
 to use its separate read-only OAuth credentials.
 
 Run the usual scan command. After the scan and any requested export finish, the
-app sends one plain-text email with the count, dates, and subjects. Classified
-scans include notice titles and audience labels. Empty scans send a zero count.
+app sends one plain-text email with the count, dates, and subjects when matching
+emails are found. Classified scans include notice titles and audience labels.
+Empty scans report that no digest was sent.
 A failed scan or export skips delivery. An SMTP failure returns an error and
 preserves the export. Rerunning a successful scan sends a fresh digest.
 Set `EMAIL_ENABLED=false` to disable sending.
@@ -243,9 +244,9 @@ Set `EMAIL_ENABLED=false` to disable sending.
 ## Daily digest on GitHub Actions
 
 The **Daily school digest** workflow runs at **07:17 Europe/London** and emails
-one digest for the previous London calendar day. It includes every matching
-message's date and subject, including a zero-count report on quiet days.
-Gmail receipt time determines which day a message belongs to.
+one digest for the previous London calendar day when matching messages are
+found. It includes each message's date and subject. On quiet days, no email is
+sent. Gmail receipt time determines which day a message belongs to.
 
 1. Complete Gmail authorization locally using the steps above. In the private
    GitHub repository, open **Settings → Secrets and variables → Actions**.
