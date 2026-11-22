@@ -1,6 +1,8 @@
 """Extract notices and verify their audiences and quotes against the local source."""
 
 import re
+from collections.abc import Iterator
+from datetime import datetime
 
 from school_reminders.domain.audience import CLASS_YEARS, ROSTER
 from school_reminders.domain.email_message import EmailMessage
@@ -24,26 +26,68 @@ def _verify(citation: Citation, segments: list[Segment]) -> dict:
     return dict(source=part.source, start=start, end=start + len(citation.quote), quote=citation.quote)
 
 
-def _validated_notice(notice: Notice, segments: list[Segment]) -> dict:
+def _calendar_date(text: str) -> bool:
+    """Accept a calendar day and month; validate yearless dates against a leap year."""
+    text = re.sub(
+        r"^(?:Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)"
+        r"\.?\s*,?\s+", "", text.strip(), flags=re.I,
+    )
+    text = re.sub(r"(?<=\d)(?:st|nd|rd|th)\b", "", text.strip(), flags=re.I)
+    text = re.sub(r"\bSept\b", "Sep", text, flags=re.I)
+    text = " ".join(text.replace(",", " ").split())
+    numeric = text.replace(".", "/").replace("-", "/")
+    for value, formats in (
+        (numeric, ("%Y/%m/%d", "%d/%m/%Y", "%d/%m/%y")),
+        (numeric + "/2000", ("%d/%m/%Y",)),
+        (text, ("%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y")),
+        (text + " 2000", ("%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y")),
+    ):
+        for fmt in formats:
+            try:
+                datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+            return True
+    return False
+
+
+def _validated_notice(notice: Notice, segments: list[Segment]) -> dict | None:
+    if notice.date_evidence is None or not _calendar_date(notice.date_evidence.quote):
+        return None
+    date_evidence = _verify(notice.date_evidence, segments)
     if not notice.title.strip() or not notice.evidence:
         raise ValueError("Groq returned a notice without a title or evidence.")
     if set(notice.years).difference(ROSTER) or set(notice.classes).difference(CLASS_YEARS):
         raise ValueError("Groq returned an unknown year or class.")
     if notice.whole_school and (notice.years or notice.classes):
-        raise ValueError("Groq returned conflicting audiences.")
+        raise EvidenceError("Groq returned conflicting audiences. Whole-school events must have empty class and year lists.")
     assigned = bool(notice.whole_school or notice.years or notice.classes)
     if assigned and not notice.audience_evidence:
         raise EvidenceError("Groq assigned an audience without evidence.")
+    if any(len(item.quote) > 100 for item in notice.audience_evidence):
+        raise EvidenceError("Quote only the audience phrase (100 characters maximum).")
     return {
         "title": notice.title,
+        "event_date": date_evidence["quote"],
+        "date_evidence": date_evidence,
         "audience": {
             "years": notice.years, "classes": notice.classes, "whole_school": notice.whole_school,
             "class_years": {name: CLASS_YEARS[name] for name in notice.classes},
             "review": notice.review or not assigned,
         },
-        "evidence": [_verify(item, segments) for item in notice.evidence],
-        "audience_evidence": [_verify(item, segments) for item in notice.audience_evidence],
+        "evidence": _concise_evidence(notice.evidence, segments),
+        "audience_evidence": _concise_evidence(notice.audience_evidence, segments),
     }
+
+
+def _concise_evidence(citations: list[Citation], segments: list[Segment]) -> list[dict]:
+    """Verify every citation and keep the first two distinct source spans for display."""
+    result = []
+    for item in citations:
+        verified = _verify(item, segments)
+        if len(result) < 2 and verified not in result:
+            result.append(verified)
+    return result
 
 
 def extract_notices(model: GroqNoticeModel, message: EmailMessage, *,
@@ -91,7 +135,45 @@ def _identify(model: GroqNoticeModel, segments: list[Segment],
                 start = end
     if not segments:
         return []
-    return _identify_batch(model, segments)
+    results = []
+    for notice in _identify_batch(model, segments):
+        if notice not in results:
+            results.append(notice)
+    for label, snapshot in newsletters.items():
+        for event in _participation_days(label, snapshot["text"]):
+            heading = event["evidence"][0]
+            if not any(
+                n["date_evidence"]["source"] == label
+                and heading["start"] <= n["date_evidence"]["start"] < heading["end"]
+                for n in results
+            ):
+                results.append(event)
+    return results
+
+
+def _participation_days(source: str, text: str) -> Iterator[dict]:
+    """Recover explicit date–title headings immediately followed by a school-wide invitation."""
+    headings = re.finditer(
+        r"^[ \t]*(?P<date>(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+)?"
+        r"\d{1,2}(?:st|nd|rd|th)?[ \t]+[A-Za-z]+(?:[ \t]+\d{4})?)[ \t]*[-–—][ \t]*"
+        r"(?P<title>[^\r\n]{1,100}?\bDay)\b[ \t-]*(?:\r?\n[ \t-]*)*"
+        r"(?P<audience>All (?:adults and children|children and adults|pupils|children)"
+        r"(?: in school)?)(?:\s*\(and\s+home!\))?\s+(?:are invited to|can wear|may wear)\b",
+        text, re.I | re.M,
+    )
+    for match in headings:
+        if not _calendar_date(match["date"]):
+            continue
+        def citation(start: int, end: int) -> dict:
+            return dict(source=source, start=start, end=end, quote=text[start:end])
+
+        yield {
+            "title": match["title"], "event_date": match["date"],
+            "date_evidence": citation(*match.span("date")),
+            "audience": dict(years=[], classes=[], whole_school=True, class_years={}, review=False),
+            "evidence": [citation(match.start("date"), match.end("title"))],
+            "audience_evidence": [citation(*match.span("audience"))],
+        }
 
 
 def _identify_batch(model: GroqNoticeModel, segments: list[Segment]) -> list[dict]:
@@ -124,11 +206,11 @@ def _verified_report(model: GroqNoticeModel, segments: list[Segment]) -> list[di
         return _select_evidence(model, segments)
     report = model.identify(segments)
     try:
-        return [_validated_notice(notice, segments) for notice in report.notices]
+        return [entry for notice in report.notices if (entry := _validated_notice(notice, segments))]
     except EvidenceError as error:
         report = model.identify(segments, correction=str(error))
     try:
-        return [_validated_notice(notice, segments) for notice in report.notices]
+        return [entry for notice in report.notices if (entry := _validated_notice(notice, segments))]
     except EvidenceError:
         if not has_newsletter:
             raise
@@ -149,8 +231,18 @@ def _select_evidence(model: GroqNoticeModel, segments: list[Segment]) -> list[di
 
     notices = []
     for selected in model.select_passages(passages).notices:
-        values = selected.model_dump(exclude={"evidence", "audience_evidence"})
-        notice = Notice(**values, evidence=[citation(i) for i in selected.evidence],
-                        audience_evidence=[citation(i) for i in selected.audience_evidence])
-        notices.append(_validated_notice(notice, passages))
+        values = selected.model_dump(exclude={"evidence"})
+        # This is the final newsletter extraction path. A missing audience citation
+        # leaves the recipients unknown; the event and date still need verification.
+        try:
+            for item in selected.audience_evidence:
+                _verify(item, passages)
+        except EvidenceError:
+            values["audience_evidence"] = []
+        if not values["audience_evidence"]:
+            values.update(years=[], classes=[], whole_school=False, review=True)
+        notice = Notice(**values, evidence=[citation(i) for i in selected.evidence])
+        entry = _validated_notice(notice, passages)
+        if entry:
+            notices.append(entry)
     return notices

@@ -99,6 +99,19 @@ custom output paths need their own ignore rules.
 
 ## Classify notices by audience
 
+Classification returns scheduled appointments and school events with an explicit
+calendar day and month in the email or newsletter. The export includes the original
+date wording in `event_date` and an exact source reference in `date_evidence`.
+Undated appeals, standalone deadlines, and relative-only dates such as “next Friday”
+are outside this filter. Repeated instructions for one appointment belong in one entry.
+Audience evidence is limited to two short phrases naming the intended recipients.
+If Groq supplies extra citations, the reader verifies them and keeps the first
+two distinct source spans in each evidence list.
+Dated theme days and optional dress-up days are included. A date such as
+“Monday 16th November” retains its weekday and ordinal when quoted from the source.
+For Sway newsletters, the reader also checks for dated, named day headings
+immediately followed by an explicit invitation to all pupils or families at school.
+
 ```powershell
 python -m school_reminders --sender info@parentmail.co.uk --limit 3 --classify --output data/notices.json
 ```
@@ -142,9 +155,15 @@ leaves the previous report intact.
 
 If Groq rejects the request size or reaches its output token limit, the reader
 processes smaller portions and combines the verified notices in source order.
+An explicit context-length error also triggers splitting. If Groq rejects its
+own generated JSON, the app retries once. Other HTTP 400 failures report the
+provider error code and request ID when supplied.
 For long newsletters, Groq selects numbered source passages and the reader copies
 the selected text directly. Short newsletters also use this fallback if a quote
 still fails verification after correction.
+When passage selection returns an event without an audience citation, the app
+clears the proposed recipients and flags the audience for review. The event
+still requires verified activity and date evidence.
 Evidence offsets still refer to the original email or newsletter snapshot.
 
 During classification, the reader follows direct public Microsoft Sway links in the
@@ -170,7 +189,7 @@ The helper runs independently of Gmail, the JSON export and email delivery.
 ```python
 from school_reminders.extraction import parse_notices
 
-report = parse_notices("Oak should bring a hat on Friday.", subject="Class trip")
+report = parse_notices("Oak class will visit the museum on 12 May.", subject="Class trip")
 for notice in report["notices"]:
     print(notice["title"], notice["audience"], notice["evidence"])
 

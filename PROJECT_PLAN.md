@@ -13,8 +13,8 @@ thread ID, and receipt timestamp matched a second Gmail read by message ID.
 Milestone 2 now uses Groq for whole-email notice extraction. The earlier
 passage-by-passage classifier was retired. Offline tests cover Gmail reading,
 extraction with a simulated Groq endpoint, and the per-email classification display.
-The three-message live check above verified Gmail only. Live Groq accuracy
-is pending a free-tier API key and a synthetic pilot.
+The three-message live check above verified Gmail. A separate live Groq test
+on synthetic text retained two dated events and omitted an undated book appeal.
 
 Development guidance: repository Python skills are installed under `.agents/skills/`
 and routed from AGENTS.md. They cover SOLID, patterns, style, typing, and validation;
@@ -52,14 +52,17 @@ Acceptance: retrieve matching emails with source evidence without modifying mail
   Keep the original email and its Gmail references with the extracted notices.
 - [x] Test the LangChain request, mixed notices, ambiguity, invalid quotes, and export failures offline.
 - [x] Label source segments explicitly and retry an evidence failure once for the affected email.
-- [ ] Run the synthetic live Groq test with a Free organization key, then evaluate
-  mixed-year newsletters for missed notices, incorrect audiences and misleading evidence.
+- [x] Retain verified Sway events with missing audience citations and mark their recipients as unclear.
+- [x] Accept weekday-prefixed ordinal dates and include optional participation days.
+- [x] Run the synthetic live Groq test for dated events and audience assignments.
+- [ ] Evaluate mixed-year newsletters for missed events and incorrect date or audience assignments.
 
 ## 3. Extract activities
 
 - [ ] Define title, description, class/year, location, event dates, deadlines,
   parent actions, evidence quotes, and source references.
-- [ ] Support multiple activities per email and unknown dates.
+- [x] Extract scheduled events with a source-backed calendar day and month, skip
+  undated requests, and limit audience evidence to short phrases.
 - [ ] Resolve relative dates from email context; use Europe/London for school times.
 - [ ] Distinguish receipt dates, event dates, and action deadlines.
 - [x] Select Groq for notice extraction.

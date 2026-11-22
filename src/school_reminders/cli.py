@@ -48,7 +48,7 @@ def _print_classification(message: EmailMessage, notices: Sequence[dict]) -> lis
         label = ", ".join(groups) or "Audience unclear"
         if audience["review"]:
             label += " (needs review)"
-        lines.append(f"  - {notice['title']} | {label}")
+        lines.append(f"  - {notice['event_date']} — {notice['title']} | {label}")
     for line in lines:
         print(line)
     return lines
