@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 from school_reminders.cli import main
 from school_reminders.email.delivery import DeliveryAuthenticationError, EmailDelivery
+from school_reminders.gmail import normalize_message
+from test_gmail import resource
 
 
 class EmailDeliveryTests(unittest.TestCase):
@@ -39,14 +41,15 @@ class EmailDeliveryTests(unittest.TestCase):
             EmailDelivery.configured()
 
     def test_sends_only_after_successful_export(self):
+        message = normalize_message(resource("private body"))
         with tempfile.TemporaryDirectory() as folder, patch("school_reminders.cli.connect"), patch(
-            "school_reminders.cli.read_messages", return_value=[]
+            "school_reminders.cli.read_messages", return_value=[message]
         ), patch.object(EmailDelivery, "send") as send, patch("builtins.print"):
             output = Path(folder) / "scan.json"
             args = ["--sender", "school@example.com", "--output", str(output)]
             def check_export(lines):
-                self.assertEqual(output.read_text(), "[]")
-                self.assertIn("0 matching email(s).", lines)
+                self.assertIn("private body", output.read_text())
+                self.assertIn("1 matching email(s).", lines)
             send.side_effect = check_export
             self.assertEqual(main(args), 0)
             with patch("school_reminders.cli._export_messages", side_effect=OSError("failed")):
@@ -55,7 +58,7 @@ class EmailDeliveryTests(unittest.TestCase):
 
     def test_daily_digest_covers_london_clock_change(self):
         with patch("school_reminders.cli.connect") as connect, patch(
-            "school_reminders.cli.read_messages", return_value=[]
+            "school_reminders.cli.read_messages", return_value=[normalize_message(resource("private body"))]
         ) as read, patch.object(EmailDelivery, "send") as send, patch("builtins.print"):
             result = main(["--sender", "school@example.com", "--received-day", "2026-10-25",
                            "--non-interactive"])
@@ -64,7 +67,16 @@ class EmailDeliveryTests(unittest.TestCase):
         self.assertIsNone(read.call_args.args[2])
         start, end = read.call_args.kwargs["received_between"]
         self.assertEqual(end - start, 25 * 3600)
-        self.assertIn("0 matching email(s) received on 2026-10-25 (Europe/London).", send.call_args.args[0])
+        self.assertIn("1 matching email(s) received on 2026-10-25 (Europe/London).", send.call_args.args[0])
+
+    def test_empty_scan_logs_delivery_skip(self):
+        with redirect_stdout(StringIO()) as log, patch("school_reminders.cli.connect"), patch(
+            "school_reminders.cli.read_messages", return_value=[]
+        ), patch.object(EmailDelivery, "send") as send:
+            self.assertEqual(main(["--sender", "school@example.com", "--safe-diagnostics"]), 0)
+        send.assert_not_called()
+        self.assertIn("Skipping digest delivery because no emails matched.", log.getvalue())
+        self.assertTrue(log.getvalue().endswith("[scan] Scan complete.\n"))
 
     def test_safe_diagnostics_hide_provider_errors(self):
         args = ["--sender", "school@example.com", "--safe-diagnostics", "--non-interactive"]
@@ -73,12 +85,15 @@ class EmailDeliveryTests(unittest.TestCase):
         ):
             self.assertEqual(main(args), 1)
         self.assertEqual(
-            log.getvalue(),
-            "Error: Gmail OAuth setup or refresh failed. Check GMAIL_TOKEN_JSON and reauthorize locally if needed.\n",
+            log.getvalue().splitlines()[-1],
+            "Error: Gmail OAuth setup or refresh failed. Check GMAIL_TOKEN_JSON and reauthorize locally if needed.",
         )
+        self.assertNotIn("private OAuth response", log.getvalue())
 
         with redirect_stdout(StringIO()) as log, patch("school_reminders.cli.connect"), patch(
-            "school_reminders.cli.read_messages", return_value=[]
+            "school_reminders.cli.read_messages", return_value=[normalize_message(resource("private body"))]
         ), patch.object(EmailDelivery, "send", side_effect=DeliveryAuthenticationError("private SMTP response")):
             self.assertEqual(main(args), 1)
-        self.assertEqual(log.getvalue(), "Error: SMTP authentication failed. Check EMAIL_FROM and SMTP_PASSWORD.\n")
+        self.assertEqual(log.getvalue().splitlines()[-1], "Error: SMTP authentication failed. Check EMAIL_FROM and SMTP_PASSWORD.")
+        for private in ("private SMTP response", "private body", "school@example.com", "Year 4 trip"):
+            self.assertNotIn(private, log.getvalue())

@@ -43,15 +43,18 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_HOST: smtp.gmail.com
           SMTP_PORT: '465'
-          CLASSIFY_NOTICES: ${{ vars.CLASSIFY_NOTICES }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -euo pipefail
+          echo "[scan] Checking required workflow settings."
           : "${SCHOOL_SENDER:?Set SCHOOL_SENDER under Settings > Secrets and variables > Actions as a repository variable or secret. This job has no GitHub environment.}"
           : "${GMAIL_TOKEN_JSON:?Set the GMAIL_TOKEN_JSON repository secret}"
           : "${EMAIL_FROM:?Set the EMAIL_FROM repository secret}"
           : "${EMAIL_TO:?Set the EMAIL_TO repository secret}"
           : "${SMTP_PASSWORD:?Set the SMTP_PASSWORD repository secret}"
+          : "${SUPABASE_DB_URL:?Set the SUPABASE_DB_URL repository secret}"
+          : "${GROQ_API_KEY:?Set the GROQ_API_KEY repository secret}"
           umask 077
           private_dir=$(mktemp -d "$RUNNER_TEMP/digest.XXXXXXXX")
           trap 'rm -rf -- "$private_dir"' EXIT
@@ -59,15 +62,16 @@ jobs:
           unset GMAIL_TOKEN_JSON
           day=${RECEIVED_DAY:-$(TZ=Europe/London date --date=yesterday +%F)}
           args=(--sender "$SCHOOL_SENDER" --token "$private_dir/token.json" --non-interactive --safe-diagnostics --received-day "$day")
-          if [[ "$CLASSIFY_NOTICES" == true ]]; then
-            : "${GROQ_API_KEY:?Set GROQ_API_KEY for classified digests}"
-            args+=(--classify --output "$private_dir/notices.json")
-          fi
+          args+=(--detailed-logs --classify --store --output "$private_dir/notices.json")
+          echo "[scan] Starting daily digest."
+          # Subjects and model replies can contain literal Actions workflow commands.
+          marker=$(python -c 'import uuid; print(uuid.uuid4().hex)')
+          echo "::stop-commands::$marker"
           # Keep provider logs and argument values on stderr out of Actions logs.
-          if python -m school_reminders "${args[@]}" 2>/dev/null; then
-            exit 0
-          else
-            status=$?
+          status=0
+          python -u -m school_reminders "${args[@]}" 2>/dev/null || status=$?
+          echo "::$marker::"
+          if [[ "$status" != 0 ]]; then
             if [[ "$status" == 2 ]]; then
               echo "::error::Invalid scan arguments. Enter the receipt date as YYYY-MM-DD."
             else

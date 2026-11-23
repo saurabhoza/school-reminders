@@ -75,6 +75,29 @@ class ExtractionTests(unittest.TestCase):
             extract_notices(self.model, self.message)
         self.assertEqual(len(self.requests), 4)
 
+    def test_actions_detail_logs_cover_real_model_call_and_retry(self):
+        message = replace(self.message, date="23 Nov 2026")
+        self.responses = iter([httpx.Response(400, json={"error": {
+            "code": "json_validate_failed", "failed_generation": "private provider diagnostic",
+        }}), self.result])
+        with tempfile.TemporaryDirectory() as folder, redirect_stdout(StringIO()) as log, patch(
+            "school_reminders.cli.connect"
+        ), patch("school_reminders.cli.read_messages", return_value=[message]), patch(
+            "school_reminders.cli.EmailDelivery.configured", return_value=None
+        ), patch.object(GroqNoticeModel, "open") as open_model:
+            open_model.return_value.__enter__.return_value = self.model
+            result = main(["--sender", "school@example.com", "--classify", "--output", str(Path(folder) / "report.json"),
+                           "--safe-diagnostics", "--detailed-logs"])
+        self.assertEqual(result, 0)
+        events = [line for line in log.getvalue().splitlines() if 'Email 1/1' in line]
+        for line in events:
+            self.assertIn("23 Nov 2026 | Year 4 trip", line)
+        call_events = [line.split(" | ")[-1] for line in events if "Groq" in line]
+        self.assertEqual(call_events[:3], ["Calling Groq API (attempt 1).", "Groq API call failed (BadRequestError).",
+                                           "Calling Groq API (attempt 2)."])
+        self.assertEqual(call_events[3], f"Groq response: {json.dumps(self.result)}")
+        self.assertNotIn("private provider diagnostic", log.getvalue())
+
     def test_other_bad_requests_report_code_without_echoing_private_data(self):
         self.responses = iter([httpx.Response(400, headers={"x-request-id": "req_test"},
             json={"error": {"code": "invalid_parameter", "message": "private content"}})])

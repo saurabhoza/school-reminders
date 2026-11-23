@@ -88,6 +88,7 @@ allowance and spending controls before enabling the workflow.
 - [x] Implement unattended read-only Gmail OAuth, Actions secret inputs, private
   logging and SMTP digest delivery for the previous London calendar day.
 - [ ] Configure repository secrets and verify the first hosted delivery.
+- [x] Show scan progress and per-email counts. Enable detailed subject, date and Groq response logs in the daily workflow.
 - [ ] Persist checkpoints and sent-reminder IDs outside the temporary runner.
   Catch up after delayed or missed runs, and ensure retries do not send duplicates.
 - [ ] Test a scheduled synthetic run and a repeated run before enabling live mail.

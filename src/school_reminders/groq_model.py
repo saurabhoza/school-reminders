@@ -4,7 +4,7 @@ import json
 import os
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import TypeVar
 
@@ -124,6 +124,17 @@ class GroqNoticeModel:
         model = ChatGroq(model=MODEL, api_key=key, timeout=45, max_retries=2, http_client=http_client,
                          cache=False, reasoning_effort="low")
         self._model = model
+        self._report_call: Callable[[str], None] | None = None
+
+    @contextmanager
+    def trace_calls(self, report: Callable[[str], None]) -> Iterator[None]:
+        """Report model calls for the current email on this scan's client."""
+        previous = self._report_call
+        self._report_call = report
+        try:
+            yield
+        finally:
+            self._report_call = previous
 
     @classmethod
     @contextmanager
@@ -170,7 +181,16 @@ class GroqNoticeModel:
                 retried_output = False
                 for attempt in range(3):
                     try:
-                        response = chain.invoke(messages)
+                        if self._report_call:
+                            self._report_call(f"Calling Groq API (attempt {attempt + 1}).")
+                        try:
+                            response = chain.invoke(messages)
+                        except Exception as error:
+                            if self._report_call:
+                                self._report_call(f"Groq API call failed ({type(error).__name__}).")
+                            raise
+                        if self._report_call:
+                            self._report_call(f"Groq response: {response.content}")
                         break
                     except BadRequestError as error:
                         code, diagnostic = _bad_request(error)

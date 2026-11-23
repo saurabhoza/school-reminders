@@ -272,9 +272,16 @@ sent. Gmail receipt time determines which day a message belongs to.
    inbox before repeating a date. Missed days require manual backfill.
 
 The runner discards the temporary OAuth token and any classified export.
-The delivery step reports which stage failed, such as Gmail OAuth or SMTP
-authentication, while keeping private mail and provider responses out of the
-Actions log. GitHub may delay scheduled runs under load.
+Watch the scan step in Actions for `[scan]` progress lines. They show Gmail
+setup and matching counts, per-email newsletter retrieval, notice extraction,
+storage, export and digest delivery as those stages run. The daily workflow
+enables `--detailed-logs`: it prints the email subject and date before processing,
+then associates each Groq call and its returned model text with that email.
+Anyone with access to the run logs can read those subjects and responses,
+including evidence quoted from school mail. Local scans omit this extra detail
+from progress lines unless the flag is supplied. The CLI writes
+progress to stderr locally and to stdout with `--safe-diagnostics`, so the
+workflow can suppress provider stderr. GitHub may delay scheduled runs under load.
 [GitHub schedule documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
 ## Python development guidance
