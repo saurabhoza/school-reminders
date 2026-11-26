@@ -43,6 +43,7 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_HOST: smtp.gmail.com
           SMTP_PORT: '465'
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -euo pipefail
@@ -52,12 +53,17 @@ jobs:
           : "${EMAIL_FROM:?Set the EMAIL_FROM repository secret}"
           : "${EMAIL_TO:?Set the EMAIL_TO repository secret}"
           : "${SMTP_PASSWORD:?Set the SMTP_PASSWORD repository secret}"
+          : "${SUPABASE_DB_URL:?Set the SUPABASE_DB_URL repository secret to the Supabase Session pooler connection string}"
           : "${GROQ_API_KEY:?Set the GROQ_API_KEY repository secret}"
           umask 077
           private_dir=$(mktemp -d "$RUNNER_TEMP/digest.XXXXXXXX")
-          trap 'rm -rf -- "$private_dir"' EXIT
+          trap 'rm -rf -- "$private_dir"; rm -f .secrets/supabase_config.py' EXIT
           printf '%s' "$GMAIL_TOKEN_JSON" > "$private_dir/token.json"
           unset GMAIL_TOKEN_JSON
+          mkdir -p .secrets
+          python -c 'import os,pathlib; pathlib.Path(".secrets/supabase_config.py").write_text("SUPABASE_DB_URL = " + repr(os.environ["SUPABASE_DB_URL"]) + "\n", encoding="utf-8")'
+          chmod 600 .secrets/supabase_config.py
+          unset SUPABASE_DB_URL
           day=${RECEIVED_DAY:-$(TZ=Europe/London date --date=yesterday +%F)}
           args=(--sender "$SCHOOL_SENDER" --token "$private_dir/token.json" --non-interactive --safe-diagnostics --received-day "$day")
           args+=(--detailed-logs --classify --store --output "$private_dir/notices.json")
