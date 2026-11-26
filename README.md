@@ -183,6 +183,12 @@ HTML body. To process a newsletter directly, fill in `SWAY_URL`. Clear it to
 switch back to the email. The Run window displays the notices. Keep real school
 content and private newsletter links out of commits.
 
+To save these parsed notices to Supabase, set `SUPABASE_DB_URL` in
+`.secrets/.env` or the process environment. Run the schema migration in the
+Supabase SQL Editor first. The script saves only when it finds validated
+notices. Pasted email and Sway sources are recorded with their own source type
+and a stable content key, separate from Gmail message IDs.
+
 With `GROQ_API_KEY` configured, call `parse_notices` directly from Python.
 The helper runs independently of Gmail, the JSON export and email delivery.
 
@@ -236,6 +242,8 @@ to use its separate read-only OAuth credentials.
 Run the usual scan command. After the scan and any requested export finish, the
 app sends one plain-text email with the count, dates, and subjects when matching
 emails are found. Classified scans include notice titles and audience labels.
+Each classified message section includes its mail title, mail date, Groq summary,
+event dates, audience and the verified evidence quotes used for each notice.
 Empty scans report that no digest was sent.
 A failed scan or export skips delivery. An SMTP failure returns an error and
 preserves the export. Rerunning a successful scan sends a fresh digest.
@@ -245,8 +253,9 @@ Set `EMAIL_ENABLED=false` to disable sending.
 
 The **Daily school digest** workflow runs at **07:17 Europe/London** and emails
 one digest for the previous London calendar day when matching messages are
-found. It includes each message's date and subject. On quiet days, no email is
-sent. Gmail receipt time determines which day a message belongs to.
+found. It includes each message's date and subject, followed by the Groq findings
+and verified evidence. On quiet days, no email is sent. Gmail receipt time
+determines which day a message belongs to.
 
 1. Complete Gmail authorization locally using the steps above. In the private
    GitHub repository, open **Settings → Secrets and variables → Actions**.

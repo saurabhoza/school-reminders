@@ -1,9 +1,11 @@
 """Edit the inputs below and run this file in PyCharm to inspect extracted notices."""
 
 from pprint import pprint
+import os
 
 from school_reminders.email.sway import canonical_sway_url
 from school_reminders.extraction import parse_notices
+from school_reminders.persistence import connect_database, save_manual_notices
 
 
 EMAIL_SUBJECT = "Class trip"
@@ -29,7 +31,24 @@ def parse_sway_url(url: str) -> dict:
 
 if __name__ == "__main__":
     if SWAY_URL.strip():
+        source_type = "sway"
+        source_reference = canonical_sway_url(SWAY_URL) or SWAY_URL
         report = parse_sway_url(SWAY_URL)
+        source_text = "\n\n".join(
+            newsletter["text"] for newsletter in report["newsletters"].values()
+        )
+        subject = ""
     else:
+        source_type = "pasted_email"
+        source_reference = ""
         report = parse_email_content(EMAIL_CONTENT, subject=EMAIL_SUBJECT, html=EMAIL_IS_HTML)
+        source_text = EMAIL_CONTENT
+        subject = EMAIL_SUBJECT
     pprint(report["notices"], sort_dicts=False)
+    if report["notices"]:
+        with connect_database() as database:
+            save_manual_notices(
+                database, source_type=source_type, source_reference=source_reference,
+                source_text=source_text, subject=subject, notices=report["notices"],
+            )
+        print("Validated notices saved to Supabase.")

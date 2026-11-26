@@ -59,9 +59,13 @@ def _email_heading(message: EmailMessage) -> str:
 def _print_classification(
     message: EmailMessage, notices: Sequence[dict], *, show_details: bool = True,
 ) -> list[str]:
-    lines = [_email_heading(message)]
+    lines = [
+        f"Mail title: {message.subject or '(no subject)'}",
+        f"Mail date: {message.date or '(no date)'}",
+        "Groq summary:",
+    ]
     if not notices:
-        lines.append("  No notices identified.")
+        lines.append("  No notices identified in this email.")
     for notice in notices:
         audience = notice["audience"]
         groups = list(audience["years"])
@@ -71,7 +75,11 @@ def _print_classification(
         label = ", ".join(groups) or "Audience unclear"
         if audience["review"]:
             label += " (needs review)"
-        lines.append(f"  - {notice['event_date']} — {notice['title']} | {label}")
+        evidence = " ".join(item["quote"] for item in notice["evidence"])
+        lines.append(
+            f"  - {notice['title']} | Event date: {notice['event_date']} | "
+            f"Audience: {label} | Evidence: {evidence}"
+        )
     if show_details:
         for line in lines:
             print(line)
@@ -163,10 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 model = resources.enter_context(GroqNoticeModel.open())
             if args.store:
                 progress.start("Connecting to Supabase.", "Could not connect to Supabase. Check SUPABASE_DB_URL.")
-                database_url = os.environ.get("SUPABASE_DB_URL")
-                if not database_url:
-                    raise ValueError("Set SUPABASE_DB_URL to the Supabase Postgres connection string.")
-                database = resources.enter_context(connect_database(database_url))
+                database = resources.enter_context(connect_database())
             progress.start("Connecting to Gmail with read-only OAuth.",
                            "Gmail OAuth setup or refresh failed. Check GMAIL_TOKEN_JSON and reauthorize locally if needed.")
             service = connect(None if args.non_interactive else args.credentials, args.token)

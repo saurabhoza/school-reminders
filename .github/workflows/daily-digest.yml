@@ -43,7 +43,6 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_HOST: smtp.gmail.com
           SMTP_PORT: '465'
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -euo pipefail
@@ -53,7 +52,6 @@ jobs:
           : "${EMAIL_FROM:?Set the EMAIL_FROM repository secret}"
           : "${EMAIL_TO:?Set the EMAIL_TO repository secret}"
           : "${SMTP_PASSWORD:?Set the SMTP_PASSWORD repository secret}"
-          : "${SUPABASE_DB_URL:?Set the SUPABASE_DB_URL repository secret}"
           : "${GROQ_API_KEY:?Set the GROQ_API_KEY repository secret}"
           umask 077
           private_dir=$(mktemp -d "$RUNNER_TEMP/digest.XXXXXXXX")
